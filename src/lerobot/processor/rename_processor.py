@@ -19,7 +19,7 @@ from typing import Any
 
 from lerobot.configs.types import PipelineFeatureType, PolicyFeature
 
-from .pipeline import ObservationProcessorStep, ProcessorStepRegistry
+from .pipeline import ActionProcessorStep, ObservationProcessorStep, ProcessorStepRegistry
 
 
 @dataclass
@@ -63,6 +63,52 @@ class RenameObservationsProcessorStep(ObservationProcessorStep):
         new_features: dict[PipelineFeatureType, dict[str, PolicyFeature]] = features.copy()
         new_features[PipelineFeatureType.OBSERVATION] = {
             self.rename_map.get(k, k): v for k, v in features[PipelineFeatureType.OBSERVATION].items()
+        }
+        return new_features
+
+
+@dataclass
+@ProcessorStepRegistry.register(name="rename_actions_processor")
+class RenameActionsProcessorStep(ActionProcessorStep):
+    """
+    A processor step that renames keys in a robot action dictionary.
+
+    This step is only applicable when the action is a dictionary (RobotAction),
+    typically during teleoperation or when interfacing with robot drivers.
+    It does not apply to policy outputs which are typically tensors (PolicyAction).
+
+    Attributes:
+        rename_map: A dictionary mapping from old key names to new key names.
+    """
+
+    rename_map: dict[str, str] = field(default_factory=dict)
+
+    def action(self, action):
+        if not isinstance(action, dict):
+            # Pass through if not a dictionary (e.g. Tensor)
+            return action
+
+        processed_action = {}
+        for key, value in action.items():
+            if key in self.rename_map:
+                processed_action[self.rename_map[key]] = value
+            else:
+                processed_action[key] = value
+
+        return processed_action
+
+    def map_features(self, features: dict[str, Any]) -> dict[str, Any]:
+        return {self.rename_map.get(k, k): v for k, v in features.items()}
+
+    def transform_features(
+        self, features: dict[PipelineFeatureType, dict[str, PolicyFeature]]
+    ) -> dict[PipelineFeatureType, dict[str, PolicyFeature]]:
+        if PipelineFeatureType.ACTION not in features:
+            return features
+            
+        new_features = features.copy()
+        new_features[PipelineFeatureType.ACTION] = {
+            self.rename_map.get(k, k): v for k, v in features[PipelineFeatureType.ACTION].items()
         }
         return new_features
 

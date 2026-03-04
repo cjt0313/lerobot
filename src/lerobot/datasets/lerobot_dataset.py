@@ -1214,8 +1214,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
                 )
                 if frame_index == 0:
                     img_path.parent.mkdir(parents=True, exist_ok=True)
-                compress_level = 1 if self.features[key]["dtype"] == "video" else 6
-                self._save_image(frame[key], img_path, compress_level)
+                # compress_level = 1 if self.features[key]["dtype"] == "video" else 6
+                self._save_image(frame[key], img_path)
                 self.episode_buffer[key].append(str(img_path))
             else:
                 self.episode_buffer[key].append(frame[key])

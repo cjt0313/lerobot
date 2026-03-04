@@ -51,10 +51,10 @@ class TrainPipelineConfig(HubMixin):
     # AND for the evaluation environments.
     seed: int | None = 1000
     # Number of workers for the dataloader.
-    num_workers: int = 4
-    batch_size: int = 8
-    steps: int = 100_000
-    eval_freq: int = 20_000
+    num_workers: int = 2
+    batch_size: int = 2
+    steps: int = 1000
+    eval_freq: int = 2000
     log_freq: int = 200
     tolerance_s: float = 1e-4
     save_checkpoint: bool = True
