@@ -26,6 +26,8 @@ from termcolor import colored
 from torch.optim import Optimizer
 from tqdm import tqdm
 
+from lerobot.configs.types import FeatureType, PolicyFeature
+from lerobot.utils.constants import ACTION
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.factory import make_dataset
@@ -228,11 +230,41 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     # using the eval.py instead, with gym_dora environment and dora-rs.
     eval_env = None
     if cfg.eval_freq > 0 and cfg.env is not None and is_main_process:
-        logging.info("Creating env")
-        eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
+        # Check if environment type is provided and not None
+        if cfg.env.type:
+             logging.info("Creating env")
+             try:
+                 eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size, use_async_envs=cfg.eval.use_async_envs)
+             except (ModuleNotFoundError, ImportError):
+                 logging.warning("Environment dependencies not found. Evaluation will be skipped.")
+                 eval_env = None
 
     if is_main_process:
         logging.info("Creating policy")
+    
+    if not cfg.rename_map:
+        cfg.rename_map = {
+            "observation.state.q_pos": "observation.state",
+            "observation.images.head_left": "observation.image",
+        }
+
+    # Manually ensure action feature exists (using q_pos shape as requested)
+    if not cfg.policy.output_features:
+        cfg.policy.output_features = {}
+    
+    # Check if action is missing and try to infer from q_pos if available
+    if "action" not in cfg.policy.output_features:
+        q_pos_key = "observation.state.q_pos"
+        if q_pos_key in dataset.meta.features:
+            q_pos_shape = tuple(dataset.meta.features[q_pos_key]["shape"])
+            # Create a PolicyFeature for action
+            cfg.policy.output_features["action"] = PolicyFeature(
+                type=FeatureType.ACTION,
+                shape=q_pos_shape
+            )
+            if is_main_process:
+                logging.info(f"Injecting action feature with shape {q_pos_shape} from {q_pos_key}")
+
     policy = make_policy(
         cfg=cfg.policy,
         ds_meta=dataset.meta,
@@ -341,9 +373,30 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
     # create dataloader for offline training
     if hasattr(cfg.policy, "drop_n_last_frames"):
         shuffle = False
+        
+        # When dataset is filtered by episodes, convert absolute indices to relative indices
+        if getattr(dataset, "episodes", None) is not None:
+            dataset_from_indices = []
+            dataset_to_indices = []
+            curr_idx = 0
+            for ep_idx in range(len(dataset.meta.episodes["dataset_from_index"])):
+                if ep_idx in getattr(dataset, "episodes", []):
+                    ep_len = dataset.meta.episodes["length"][ep_idx]
+                    if hasattr(ep_len, "item"):
+                        ep_len = ep_len.item()
+                    dataset_from_indices.append(curr_idx)
+                    curr_idx += ep_len
+                    dataset_to_indices.append(curr_idx)
+                else:
+                    dataset_from_indices.append(0)
+                    dataset_to_indices.append(0)
+        else:
+            dataset_from_indices = dataset.meta.episodes["dataset_from_index"]
+            dataset_to_indices = dataset.meta.episodes["dataset_to_index"]
+
         sampler = EpisodeAwareSampler(
-            dataset.meta.episodes["dataset_from_index"],
-            dataset.meta.episodes["dataset_to_index"],
+            dataset_from_indices,
+            dataset_to_indices,
             episode_indices_to_use=dataset.episodes,
             drop_n_last_frames=cfg.policy.drop_n_last_frames,
             shuffle=True,

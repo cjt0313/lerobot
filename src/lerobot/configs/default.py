@@ -30,6 +30,8 @@ class DatasetConfig:
     # Root directory where the dataset will be stored (e.g. 'dataset/path'). If None, defaults to $HF_LEROBOT_HOME/repo_id.
     root: str | None = None
     episodes: list[int] | None = None
+    task_indices: list[int] | None = None
+    task_index_episode_dict_path: str | None = None
     image_transforms: ImageTransformsConfig = field(default_factory=ImageTransformsConfig)
     revision: str | None = None
     use_imagenet_stats: bool = True

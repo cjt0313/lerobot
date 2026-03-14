@@ -17,7 +17,7 @@
 from dataclasses import dataclass, field
 
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.configs.types import NormalizationMode
+from lerobot.configs.types import NormalizationMode, PolicyFeature, FeatureType
 from lerobot.optim.optimizers import AdamConfig
 from lerobot.optim.schedulers import DiffuserSchedulerConfig
 
@@ -105,6 +105,18 @@ class DiffusionConfig(PreTrainedConfig):
     horizon: int = 16
     n_action_steps: int = 8
 
+    input_features: dict[str, PolicyFeature] = field(
+        default_factory=lambda: {
+            "observation.state": PolicyFeature(type=FeatureType.STATE, shape=(21,)),
+            "observation.image": PolicyFeature(type=FeatureType.VISUAL, shape=(3, 720, 1280)),
+        }
+    )
+    output_features: dict[str, PolicyFeature] = field(
+        default_factory=lambda: {
+            "action": PolicyFeature(type=FeatureType.ACTION, shape=(21,)),
+        }
+    )
+
     normalization_mapping: dict[str, NormalizationMode] = field(
         default_factory=lambda: {
             "VISUAL": NormalizationMode.MEAN_STD,
@@ -116,16 +128,18 @@ class DiffusionConfig(PreTrainedConfig):
     # The original implementation doesn't sample frames for the last 7 steps,
     # which avoids excessive padding and leads to improved training results.
     drop_n_last_frames: int = 7  # horizon - n_action_steps - n_obs_steps + 1
+    
+    use_delta: bool = True
 
     # Architecture / modeling.
     # Vision backbone.
-    vision_backbone: str = "resnet18"
+    vision_backbone: str = "resnet34"
     resize_shape: tuple[int, int] | None = None
     crop_ratio: float = 1.0
     crop_shape: tuple[int, int] | None = None
     crop_is_random: bool = True
-    pretrained_backbone_weights: str | None = None
-    use_group_norm: bool = True
+    pretrained_backbone_weights: str | None = "ResNet34_Weights.IMAGENET1K_V1"
+    use_group_norm: bool = False
     spatial_softmax_num_keypoints: int = 32
     use_separate_rgb_encoder_per_camera: bool = False
     # Unet.

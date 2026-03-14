@@ -15,6 +15,7 @@
 # limitations under the License.
 import logging
 from pprint import pformat
+import json
 
 import torch
 
@@ -64,8 +65,18 @@ def resolve_delta_timestamps(
 
     if len(delta_timestamps) == 0:
         delta_timestamps = None
+    
+    # Check if we are using delta method and need to extend q_pos horizon to match action horizon
+    if getattr(cfg, "use_delta", False) and "observation.state.q_pos" in ds_meta.features:
+        # Check if action_delta_indices covers a larger range (it should for diffusion)
+        if cfg.action_delta_indices:
+             # Use action indices for q_pos
+             delta_timestamps["observation.state.q_pos"] = [
+                  i / ds_meta.fps for i in cfg.action_delta_indices
+             ]
 
     return delta_timestamps
+
 
 
 def make_dataset(cfg: TrainPipelineConfig) -> LeRobotDataset | MultiLeRobotDataset:
@@ -89,11 +100,37 @@ def make_dataset(cfg: TrainPipelineConfig) -> LeRobotDataset | MultiLeRobotDatas
             cfg.dataset.repo_id, root=cfg.dataset.root, revision=cfg.dataset.revision
         )
         delta_timestamps = resolve_delta_timestamps(cfg.policy, ds_meta)
+        
+        episodes_to_load = cfg.dataset.episodes
+        if getattr(cfg.dataset, "task_indices", None) is not None and getattr(cfg.dataset, "task_index_episode_dict_path", None) is not None:
+            # Load task subset
+            try:
+                with open(cfg.dataset.task_index_episode_dict_path, "r") as f:
+                    task_map = json.load(f)
+                
+                valid_episodes = []
+                for t_idx in cfg.dataset.task_indices:
+                    t_idx_str = str(t_idx)
+                    if t_idx_str in task_map:
+                        valid_episodes.extend(task_map[t_idx_str])
+                    else:
+                        logging.warning(f"Task index {t_idx} not found in {cfg.dataset.task_index_episode_dict_path}")
+                
+                # Intersect with dataset.episodes if that was also provided
+                if episodes_to_load is not None:
+                    episodes_to_load = list(set(episodes_to_load).intersection(set(valid_episodes)))
+                else:
+                    episodes_to_load = list(set(valid_episodes))
+                    
+                logging.info(f"Loaded {len(episodes_to_load)} episodes mapped from task indices: {cfg.dataset.task_indices}")
+            except Exception as e:
+                logging.error(f"Failed to load task mapping: {e}")
+                
         if not cfg.dataset.streaming:
             dataset = LeRobotDataset(
                 cfg.dataset.repo_id,
                 root=cfg.dataset.root,
-                episodes=cfg.dataset.episodes,
+                episodes=episodes_to_load,
                 delta_timestamps=delta_timestamps,
                 image_transforms=image_transforms,
                 revision=cfg.dataset.revision,
@@ -104,7 +141,7 @@ def make_dataset(cfg: TrainPipelineConfig) -> LeRobotDataset | MultiLeRobotDatas
             dataset = StreamingLeRobotDataset(
                 cfg.dataset.repo_id,
                 root=cfg.dataset.root,
-                episodes=cfg.dataset.episodes,
+                episodes=episodes_to_load,
                 delta_timestamps=delta_timestamps,
                 image_transforms=image_transforms,
                 revision=cfg.dataset.revision,
